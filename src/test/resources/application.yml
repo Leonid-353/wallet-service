@@ -1,0 +1,25 @@
+spring:
+  liquibase:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+wallet:
+  processing:
+    lock-timeout-ms: ${WALLET_LOCK_TIMEOUT:2000}
+    max-retries: ${WALLET_MAX_RETRIES:3}
+    retry-delay-ms: ${WALLET_RETRY_DELAY:100}
+    buffer:
+      flush-interval-ms: ${BUFFER_FLUSH_INTERVAL:100}
+      max-buffer-size: ${BUFFER_MAX_SIZE:10000}
+      empty-log-interval: ${BUFFER_EMPTY_LOG_INTERVAL:500}
+    recovery:
+      interval-ms: ${RECOVERY_INTERVAL:300000}
+      max-retries: ${RECOVERY_MAX_RETRIES:3}
+      stuck-threshold-minutes: ${STUCK_THRESHOLD_MINUTES:5}
+
+logging:
+  level:
+    root: WARN
+    com.github.leonid353: DEBUG

@@ -1,0 +1,102 @@
+# =============================================================================
+# ОСНОВНАЯ КОНФИГУРАЦИЯ WALLET SERVICE
+# =============================================================================
+# Все параметры можно переопределить через переменные окружения без пересборки контейнера.
+# Пример: SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/walletdb
+
+spring:
+  application:
+    name: wallet-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/walletdb}
+    username: ${SPRING_DATASOURCE_USERNAME:username}
+    password: ${SPRING_DATASOURCE_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${DB_POOL_CONN_TIMEOUT:30000}
+      idle-timeout: ${DB_POOL_IDLE_TIMEOUT:600000}
+      max-lifetime: ${DB_POOL_MAX_LIFETIME:1800000}
+      pool-name: WalletServiceHikariCP
+      connection-test-query: SELECT 1
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        show_sql: ${JPA_SHOW_SQL:false}
+        format_sql: ${JPA_FORMAT_SQL:false}
+        jdbc:
+          batch_size: ${JPA_BATCH_SIZE:20}
+          time_zone: UTC
+    open-in-view: false
+
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-main.yaml
+
+wallet:
+  processing:
+    lock-timeout-ms: ${WALLET_LOCK_TIMEOUT:2000}
+    max-retries: ${WALLET_MAX_RETRIES:3}
+    retry-delay-ms: ${WALLET_RETRY_DELAY:100}
+    buffer:
+      flush-interval-ms: ${BUFFER_FLUSH_INTERVAL:100}
+      max-buffer-size: ${BUFFER_MAX_SIZE:10000}
+      empty-log-interval: ${BUFFER_EMPTY_LOG_INTERVAL:500}
+    recovery:
+      interval-ms: ${RECOVERY_INTERVAL:300000}
+      max-retries: ${RECOVERY_MAX_RETRIES:3}
+      stuck-threshold-minutes: ${STUCK_THRESHOLD_MINUTES:5}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    readinessstate:
+      enabled: true
+    livenessstate:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+    com.github.leonid353: ${APP_LOG_LEVEL:DEBUG}
+    org.springframework.web: ${WEB_LOG_LEVEL:INFO}
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:WARN}
+    org.hibernate.type.descriptor.sql.BasicBinder: ${SQL_PARAMS_LOG_LEVEL:WARN}
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:200}
+      min-spare: ${TOMCAT_MIN_THREADS:10}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:100}
+    connection-timeout: ${TOMCAT_CONN_TIMEOUT:20000}
