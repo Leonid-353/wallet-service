@@ -154,10 +154,8 @@ public class WalletTransactionBuffer {
             int updated = walletRepository.updateBalance(walletId, totalDelta);
 
             if (updated == 0) {
-                log.warn("Кошелёк не найден при flush: walletId={}", walletId);
-                markTransactionsFailed(batch, "Кошелёк не найден");
-                batch.forEach(op -> op.future().completeExceptionally(
-                        new WalletNotFoundException(walletId)));
+                log.debug("Batch не прошел целиком, обрабатываем частично: walletId={}", walletId);
+                processPartialBatch(walletId, batch);
                 return true;
             }
 
@@ -169,10 +167,66 @@ public class WalletTransactionBuffer {
 
         } catch (DataIntegrityViolationException e) {
             log.warn("Недостаточно средств при flush: walletId={}, сумма={}", walletId, totalDelta);
-            markTransactionsFailed(batch, "Недостаточно средств");
-            batch.forEach(op -> op.future().completeExceptionally(
-                    new InsufficientFundsException("Недостаточно средств на кошельке")));
+            processPartialBatch(walletId, batch);
             return true;
+        }
+    }
+
+    private void processPartialBatch(UUID walletId, List<PendingOp> batch) {
+        Wallet wallet = walletRepository.findById(walletId).orElse(null);
+        if (wallet == null) {
+            markTransactionsFailed(batch, "Кошелёк не найден");
+            batch.forEach(op -> op.future().completeExceptionally(new WalletNotFoundException(walletId)));
+            return;
+        }
+
+        // Разделяем на депозиты (всегда проходят) и снятия (требуют проверки)
+        List<PendingOp> deposits = batch.stream()
+                .filter(op -> op.amount().compareTo(BigDecimal.ZERO) >= 0)
+                .toList();
+        List<PendingOp> withdraws = batch.stream()
+                .filter(op -> op.amount().compareTo(BigDecimal.ZERO) < 0)
+                .toList();
+
+        List<PendingOp> completed = new ArrayList<>();
+        List<PendingOp> failed = new ArrayList<>();
+
+        // Депозиты всегда проходят
+        completed.addAll(deposits);
+
+        // Снятия проверяем по балансу (с учетом депозитов)
+        BigDecimal depositsSum = deposits.stream()
+                .map(PendingOp::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal runningBalance = wallet.getBalance().add(depositsSum);
+
+        for (PendingOp op : withdraws) {
+            BigDecimal newBalance = runningBalance.add(op.amount());
+            if (newBalance.compareTo(BigDecimal.ZERO) >= 0) {
+                completed.add(op);
+                runningBalance = newBalance;
+            } else {
+                failed.add(op);
+            }
+        }
+
+        // Один UPDATE на все успешные операции
+        if (!completed.isEmpty()) {
+            BigDecimal totalDelta = completed.stream()
+                    .map(PendingOp::amount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            walletRepository.updateBalance(walletId, totalDelta);
+            markTransactionsCompleted(completed);
+            completed.forEach(op -> op.future().complete(op.transactionId()));
+            log.info("Частичный flush: walletId={}, выполнено={} (депозитов={}, снятий={}), пропущено снятий={}",
+                    walletId, completed.size(), deposits.size(), completed.size() - deposits.size(), failed.size());
+        }
+
+        if (!failed.isEmpty()) {
+            markTransactionsFailed(failed, "Недостаточно средств");
+            failed.forEach(op -> op.future().completeExceptionally(
+                    new InsufficientFundsException("Недостаточно средств на кошельке")));
         }
     }
 

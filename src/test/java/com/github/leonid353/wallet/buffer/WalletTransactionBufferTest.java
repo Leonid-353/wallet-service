@@ -127,6 +127,83 @@ public class WalletTransactionBufferTest {
     }
 
     @Test
+    void shouldProcess10000RequestsOnSameWallet() throws Exception {
+        int requests = 10000;
+        List<CompletableFuture<UUID>> futures = new ArrayList<>();
+
+        Instant start = Instant.now();
+
+        for (int i = 0; i < requests; i++) {
+            futures.add(buffer.addTransaction(walletId, new BigDecimal("1.00"), TransactionType.DEPOSIT));
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .get(60, TimeUnit.SECONDS);
+
+        Instant end = Instant.now();
+        Duration duration = Duration.between(start, end);
+
+        long completedCount = futures.stream()
+                .filter(CompletableFuture::isDone)
+                .filter(f -> !f.isCompletedExceptionally())
+                .count();
+        assertThat(completedCount).isEqualTo(requests);
+
+        System.out.printf("10000 запросов обработано за %d мс (%.0f RPS)%n",
+                duration.toMillis(),
+                requests / (duration.toMillis() / 1000.0));
+    }
+
+    @Test
+    void shouldProcess10000MixedRequestsWithPeriodicLoad() throws Exception {
+        int totalRequests = 10000;
+        int batchSize = 1000;
+        int intervalMs = 1000; // каждую секунду
+        List<CompletableFuture<UUID>> futures = new ArrayList<>();
+
+        Instant start = Instant.now();
+
+        for (int second = 0; second < totalRequests / batchSize; second++) {
+            Instant batchStart = Instant.now();
+
+            // Отправляем 1000 смешанных запросов
+            for (int i = 0; i < batchSize / 2; i++) {
+                futures.add(buffer.addTransaction(walletId, new BigDecimal("10.00"), TransactionType.DEPOSIT));
+            }
+            for (int i = 0; i < batchSize / 2; i++) {
+                futures.add(buffer.addTransaction(walletId, new BigDecimal("-5.00"), TransactionType.WITHDRAW));
+            }
+
+            // Ждем до следующей секунды
+            long elapsed = Duration.between(batchStart, Instant.now()).toMillis();
+            if (elapsed < intervalMs) {
+                Thread.sleep(intervalMs - elapsed);
+            }
+        }
+
+        // Ждем завершения всех операций
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .get(60, TimeUnit.SECONDS);
+
+        Instant end = Instant.now();
+        Duration duration = Duration.between(start, end);
+
+        long completedCount = futures.stream()
+                .filter(CompletableFuture::isDone)
+                .filter(f -> !f.isCompletedExceptionally())
+                .count();
+        assertThat(completedCount).isEqualTo(totalRequests);
+
+        // Проверяем баланс: 5000 * 10 - 5000 * 5 = 25000
+        Wallet wallet = walletRepository.findById(walletId).orElseThrow();
+        assertThat(wallet.getBalance()).isEqualByComparingTo(new BigDecimal("1025000.00"));
+
+        System.out.printf("10000 смешанных запросов (по 1000/сек): обработано за %d мс (%.0f RPS)%n",
+                duration.toMillis(),
+                totalRequests / (duration.toMillis() / 1000.0));
+    }
+
+    @Test
     void shouldProcessMixedDepositsAndWithdraws() throws Exception {
         List<CompletableFuture<UUID>> futures = new ArrayList<>();
 
